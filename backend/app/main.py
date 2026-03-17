@@ -9,10 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.schemas.ask import AskRequest, AskResponse
 from app.schemas.upload import UploadResponse
 from app.services.pdf_extractor import extract_pdf_text
+from app.services.text_chunker import chunk_document_with_page_metadata
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 UPLOAD_DIR = BASE_DIR / "data" / "uploads"
 MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20MB
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 160
 
 app = FastAPI(title="DocPilot-RAG API", version="0.1.0")
 
@@ -80,6 +83,13 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
 
     try:
         extracted = extract_pdf_text(content)
+        chunks = chunk_document_with_page_metadata(
+            pages=list(extracted.get("pages", [])),
+            file_id=file_id,
+            filename=file.filename,
+            chunk_size=CHUNK_SIZE,
+            overlap=CHUNK_OVERLAP,
+        )
         payload = {
             "file_id": file_id,
             "original_filename": file.filename,
@@ -87,6 +97,7 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
             "page_count": extracted["page_count"],
             "pages": extracted["pages"],
             "full_text": extracted["full_text"],
+            "chunks": chunks,
             "extracted_at": datetime.now(timezone.utc).isoformat(),
         }
         json_path.write_text(
