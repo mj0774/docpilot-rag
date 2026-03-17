@@ -11,6 +11,7 @@ from app.schemas.ask import AskRequest, AskResponse
 from app.schemas.ask import SourceItem
 from app.schemas.upload import UploadResponse
 from app.services.embeddings import embed_query, embed_texts
+from app.services.generation import generate_answer
 from app.services.pdf_extractor import extract_pdf_text
 from app.services.text_chunker import chunk_document_with_page_metadata
 from app.services.vector_store import query_top_k, upsert_chunks
@@ -133,32 +134,43 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
 
 @app.post("/ask", response_model=AskResponse)
 def ask(payload: AskRequest) -> AskResponse:
-    query_embedding = embed_query(payload.question)
-    result = query_top_k(query_embedding, k=ASK_TOP_K)
+    try:
+        query_embedding = embed_query(payload.question)
+        result = query_top_k(query_embedding, k=ASK_TOP_K)
 
-    documents = result.get("documents", [[]])
-    metadatas = result.get("metadatas", [[]])
-    distances = result.get("distances", [[]])
+        documents = result.get("documents", [[]])
+        metadatas = result.get("metadatas", [[]])
+        distances = result.get("distances", [[]])
 
-    docs = documents[0] if documents else []
-    metas = metadatas[0] if metadatas else []
-    dists = distances[0] if distances else []
+        docs = documents[0] if documents else []
+        metas = metadatas[0] if metadatas else []
+        dists = distances[0] if distances else []
 
-    sources: list[SourceItem] = []
-    for idx, doc in enumerate(docs):
-        metadata = metas[idx] if idx < len(metas) and isinstance(metas[idx], dict) else {}
-        distance = dists[idx] if idx < len(dists) else None
-        score = float(distance) if isinstance(distance, (float, int)) else None
-        chunk_index_raw = metadata.get("chunk_index")
-        chunk_index = chunk_index_raw if isinstance(chunk_index_raw, int) else None
-        sources.append(
-            SourceItem(
-                title=str(metadata.get("filename", "")) or None,
-                snippet=str(doc),
-                file_id=str(metadata.get("file_id", "")) or None,
-                chunk_index=chunk_index,
-                score=score,
+        sources: list[SourceItem] = []
+        contexts: list[str] = []
+        for idx, doc in enumerate(docs):
+            metadata = metas[idx] if idx < len(metas) and isinstance(metas[idx], dict) else {}
+            distance = dists[idx] if idx < len(dists) else None
+            score = float(distance) if isinstance(distance, (float, int)) else None
+            chunk_index_raw = metadata.get("chunk_index")
+            chunk_index = chunk_index_raw if isinstance(chunk_index_raw, int) else None
+            snippet = str(doc)
+
+            sources.append(
+                SourceItem(
+                    title=str(metadata.get("filename", "")) or None,
+                    snippet=snippet,
+                    file_id=str(metadata.get("file_id", "")) or None,
+                    chunk_index=chunk_index,
+                    score=score,
+                )
             )
-        )
+            contexts.append(snippet)
 
-    return AskResponse(answer="top-3 검색 결과입니다.", sources=sources)
+        answer = generate_answer(payload.question, contexts)
+        return AskResponse(answer=answer, sources=sources)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="질문 처리 중 오류가 발생했습니다.",
+        ) from exc
