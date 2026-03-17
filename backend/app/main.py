@@ -5,17 +5,25 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 from app.schemas.ask import AskRequest, AskResponse
+from app.schemas.ask import SourceItem
 from app.schemas.upload import UploadResponse
+from app.services.embeddings import embed_query, embed_texts
 from app.services.pdf_extractor import extract_pdf_text
 from app.services.text_chunker import chunk_document_with_page_metadata
+from app.services.vector_store import query_top_k, upsert_chunks
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 UPLOAD_DIR = BASE_DIR / "data" / "uploads"
 MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20MB
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 160
+ASK_TOP_K = 3
+
+# Load backend/.env into process env at startup import time.
+load_dotenv(BASE_DIR / ".env")
 
 app = FastAPI(title="DocPilot-RAG API", version="0.1.0")
 
@@ -90,6 +98,10 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
             chunk_size=CHUNK_SIZE,
             overlap=CHUNK_OVERLAP,
         )
+        chunk_contents = [str(chunk.get("content", "")) for chunk in chunks]
+        chunk_embeddings = embed_texts(chunk_contents)
+        upsert_chunks(file_id=file_id, chunks=chunks, embeddings=chunk_embeddings)
+
         payload = {
             "file_id": file_id,
             "original_filename": file.filename,
@@ -121,5 +133,32 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
 
 @app.post("/ask", response_model=AskResponse)
 def ask(payload: AskRequest) -> AskResponse:
-    answer = f"현재 MVP 단계 응답입니다. 질문: {payload.question}"
-    return AskResponse(answer=answer, sources=[])
+    query_embedding = embed_query(payload.question)
+    result = query_top_k(query_embedding, k=ASK_TOP_K)
+
+    documents = result.get("documents", [[]])
+    metadatas = result.get("metadatas", [[]])
+    distances = result.get("distances", [[]])
+
+    docs = documents[0] if documents else []
+    metas = metadatas[0] if metadatas else []
+    dists = distances[0] if distances else []
+
+    sources: list[SourceItem] = []
+    for idx, doc in enumerate(docs):
+        metadata = metas[idx] if idx < len(metas) and isinstance(metas[idx], dict) else {}
+        distance = dists[idx] if idx < len(dists) else None
+        score = float(distance) if isinstance(distance, (float, int)) else None
+        chunk_index_raw = metadata.get("chunk_index")
+        chunk_index = chunk_index_raw if isinstance(chunk_index_raw, int) else None
+        sources.append(
+            SourceItem(
+                title=str(metadata.get("filename", "")) or None,
+                snippet=str(doc),
+                file_id=str(metadata.get("file_id", "")) or None,
+                chunk_index=chunk_index,
+                score=score,
+            )
+        )
+
+    return AskResponse(answer="top-3 검색 결과입니다.", sources=sources)

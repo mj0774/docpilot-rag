@@ -25,7 +25,6 @@ def chunk_document_with_page_metadata(
         return []
 
     full_text_parts: list[str] = []
-    page_ranges: list[dict[str, int]] = []
     cursor = 0
 
     for idx, page in enumerate(normalized_pages):
@@ -34,18 +33,8 @@ def chunk_document_with_page_metadata(
             cursor += 2
 
         text = str(page["text"])
-        start = cursor
         full_text_parts.append(text)
         cursor += len(text)
-        end = cursor
-
-        page_ranges.append(
-            {
-                "page": int(page["page"]),
-                "start": start,
-                "end": end,
-            }
-        )
 
     full_text = "".join(full_text_parts)
     step = chunk_size - overlap
