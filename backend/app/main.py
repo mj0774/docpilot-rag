@@ -1,3 +1,5 @@
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -5,6 +7,8 @@ from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.schemas.ask import AskRequest, AskResponse
+from app.schemas.upload import UploadResponse
+from app.services.pdf_extractor import extract_pdf_text
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 UPLOAD_DIR = BASE_DIR / "data" / "uploads"
@@ -34,8 +38,8 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/upload")
-async def upload(file: UploadFile = File(...)) -> dict[str, str]:
+@app.post("/upload", response_model=UploadResponse)
+async def upload(file: UploadFile = File(...)) -> UploadResponse:
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -63,21 +67,46 @@ async def upload(file: UploadFile = File(...)) -> dict[str, str]:
 
     file_id = uuid4().hex
     stored_name = f"{file_id}.pdf"
-    target_path = UPLOAD_DIR / stored_name
+    pdf_path = UPLOAD_DIR / stored_name
+    json_path = UPLOAD_DIR / f"{file_id}.json"
 
     try:
-        target_path.write_bytes(content)
+        pdf_path.write_bytes(content)
     except OSError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="파일 저장 중 오류가 발생했습니다.",
         ) from exc
 
-    return {
-        "message": "문서 업로드가 완료되었습니다.",
-        "file_id": file_id,
-        "filename": file.filename,
-    }
+    try:
+        extracted = extract_pdf_text(content)
+        payload = {
+            "file_id": file_id,
+            "original_filename": file.filename,
+            "stored_pdf_path": str(pdf_path.relative_to(BASE_DIR)),
+            "page_count": extracted["page_count"],
+            "pages": extracted["pages"],
+            "full_text": extracted["full_text"],
+            "extracted_at": datetime.now(timezone.utc).isoformat(),
+        }
+        json_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="PDF 텍스트 추출 중 오류가 발생했습니다.",
+        ) from exc
+
+    return UploadResponse(
+        message="문서 업로드 및 텍스트 추출이 완료되었습니다.",
+        file_id=file_id,
+        filename=file.filename,
+        page_count=int(extracted["page_count"]),
+        text_json_path=str(json_path.relative_to(BASE_DIR)),
+    )
+
 
 @app.post("/ask", response_model=AskResponse)
 def ask(payload: AskRequest) -> AskResponse:
