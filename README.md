@@ -2,7 +2,7 @@
 
 PDF 문서를 업로드하면 텍스트를 추출하고, 임베딩 기반 검색을 통해 질문에 답변하는 RAG(Retrieval-Augmented Generation) 프로젝트입니다.
 
-단순 챗봇이 아니라 문서 업로드 → 검색 → 답변 생성 → 출처 제공까지 이어지는 RAG 파이프라인을 end-to-end로 직접 구현했습니다.
+단순 챗봇이 아니라 문서 업로드 -> 검색 -> 답변 생성 -> 출처 제공까지 이어지는 RAG 파이프라인을 end-to-end로 직접 구현했습니다.
 
 또한 retrieval 품질 개선을 위해 Similarity Search와 MMR(Maximal Marginal Relevance)를 비교하는 실험을 수행했습니다.
 
@@ -94,11 +94,6 @@ python scripts/compare_retrieval.py
 
 문서 표지나 목차는 핵심 키워드를 많이 포함하기 때문에 실제 본문보다 retrieval 상위에 노출되는 문제가 발생했습니다.
 
-해결 방향:
-
-- 표지/목차 chunk 가중치 하향
-- 특정 패턴 페이지 제외
-
 ### 2. Retrieval 다양성과 정확도의 Trade-off
 
 MMR을 적용하면 중복 chunk는 줄지만 항상 정답률이 개선되는 것은 아니었습니다.
@@ -167,12 +162,11 @@ npm run dev
 - Retrieval 품질 비교 실험 구성
 - 답변 + 출처 제공 UX 구현
 
-단순히 LLM 호출이 아니라 문서 처리 → 검색 → 생성 → 근거 제공까지 이어지는 실제 서비스 구조를 구현했습니다.
+단순히 LLM 호출이 아니라 문서 처리 -> 검색 -> 생성 -> 근거 제공까지 이어지는 실제 서비스 구조를 구현했습니다.
 
 ## 향후 개선
 
 - `file_id` 기반 retrieval 필터
-- 표지/목차 chunk 필터링
 - chunk 전략 개선
 - 평가셋 확장
 - citation UX 개선
