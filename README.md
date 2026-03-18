@@ -1,80 +1,178 @@
 # DocPilot-RAG
 
-문서를 업로드하고, 해당 문서의 내용을 기반으로 질문에 답변하는 **RAG 기반 문서 분석 AI Agent** 프로젝트입니다.
+PDF 문서를 업로드하면 텍스트를 추출하고, 임베딩 기반 검색을 통해 질문에 답변하는 RAG(Retrieval-Augmented Generation) 프로젝트입니다.
 
-사용자는 PDF 등 문서를 업로드한 뒤, 문서 내용을 탐색하거나 질문할 수 있습니다.  
-시스템은 문서를 청크 단위로 분할하고, 임베딩 및 벡터 저장소를 활용해 관련 문맥을 검색한 뒤, LLM을 통해 답변을 생성합니다.
+단순 챗봇이 아니라 문서 업로드 → 검색 → 답변 생성 → 출처 제공까지 이어지는 RAG 파이프라인을 end-to-end로 직접 구현했습니다.
 
----
-
-## 프로젝트 목표
-
-이 프로젝트의 목표는 단순한 문서 업로드 서비스가 아니라,  
-**문서를 이해하고 질의응답할 수 있는 AI 문서 분석 서비스**를 만드는 것입니다.
-
-특히 다음과 같은 흐름을 구현하는 것을 목표로 합니다.
-
-- 문서 업로드
-- 문서 파싱 및 청크 분할
-- 임베딩 생성 및 벡터 DB 저장
-- 사용자 질문 입력
-- 관련 문맥 검색(Retrieval)
-- LLM 기반 답변 생성
-- 추후 Agent 기능 확장
-
----
+또한 retrieval 품질 개선을 위해 Similarity Search와 MMR(Maximal Marginal Relevance)를 비교하는 실험을 수행했습니다.
 
 ## 핵심 기능
 
-### 1. 문서 업로드
-- 사용자가 PDF 등의 문서를 업로드할 수 있습니다.
-- 업로드된 문서는 서버에서 파싱됩니다.
+- PDF 업로드 및 저장
+- PyMuPDF 기반 텍스트 추출
+- 슬라이딩 윈도우 청킹 (800 / 160)
+- OpenAI Embedding 생성
+- ChromaDB 벡터 저장
+- 질문 기반 Retrieval
+- GPT 기반 답변 생성
+- 답변과 함께 출처 snippet / 페이지 제공
 
-### 2. 문서 전처리 및 청크 분할
-- 문서 내용을 페이지 또는 문단 단위로 추출합니다.
-- 검색 정확도를 높이기 위해 적절한 길이로 청크를 분할합니다.
+## 시스템 아키텍처
 
-### 3. 임베딩 및 벡터 저장
-- 분할된 문서 청크를 임베딩 벡터로 변환합니다.
-- 벡터 데이터베이스(예: Chroma)에 저장합니다.
+```text
+PDF Upload
+   ↓
+Text Extraction (PyMuPDF)
+   ↓
+Chunking (800 / 160)
+   ↓
+Embedding (text-embedding-3-small)
+   ↓
+ChromaDB
 
-### 4. RAG 기반 질의응답
-- 사용자가 질문을 입력하면 관련 문서 청크를 검색합니다.
-- 검색된 문맥을 기반으로 LLM이 답변을 생성합니다.
+User Question
+   ↓
+Query Embedding
+   ↓
+Retrieval (MMR, k=5)
+   ↓
+GPT Answer Generation (gpt-4o-mini)
+   ↓
+Answer + Sources
+```
 
-### 5. 답변 근거 제공
-- 답변 생성에 사용된 문서 일부 또는 출처를 함께 보여줄 수 있도록 설계합니다.
-- 추후 신뢰성 있는 응답을 위한 citation 기능을 확장할 예정입니다.
+## 기술 스택
 
-### 6. Agent 확장 가능 구조
-- 단순 Q&A를 넘어서 요약, 핵심 포인트 추출, 문서 비교, 액션 제안 등의 기능으로 확장 가능한 구조를 목표로 합니다.
+### Backend
+- FastAPI
 
----
+### Frontend
+- React
+- TypeScript
+- Vite
+- Tailwind
 
-## 예상 사용자 시나리오
+### AI
+- OpenAI API
+- ChromaDB
+- PyMuPDF
 
-### 시나리오 1. 문서 기반 질의응답
-1. 사용자가 PDF 문서를 업로드합니다.
-2. 시스템이 문서를 분석하여 벡터 DB에 저장합니다.
-3. 사용자가 문서에 대해 질문합니다.
-4. 시스템이 관련 문맥을 검색하고 답변을 생성합니다.
+## Retrieval 개선 실험
 
-예시:
-- "이 문서의 핵심 내용을 요약해줘"
-- "3장에서 말하는 문제점은 뭐야?"
-- "이 계약서에서 해지 조건이 어떻게 돼?"
+단순 구현에 그치지 않고 retrieval 품질을 비교하기 위해 고정 질문셋 기반 실험 스크립트를 구현했습니다.
 
-### 시나리오 2. 문서 요약 및 핵심 정보 추출
-- 전체 문서 요약
-- 장별 요약
-- 핵심 키워드 추출
-- 중요 문장 추출
+### 비교 방식
 
-### 시나리오 3. 문서 분석 Agent 확장
-추후에는 다음 기능까지 확장할 수 있습니다.
+| 방식 | 설정 |
+|---|---|
+| Before | similarity search (k=3) |
+| After | MMR retrieval (k=5) |
 
-- 문서 비교 분석
-- 문서별 Q&A 히스토리 관리
-- 사용자별 문서 저장 및 조회
-- 문서 기반 업무 보조 Agent
-- 보고서/회의자료 자동 요약
+### 실행
+
+```bash
+cd backend
+python scripts/compare_retrieval.py
+```
+
+### 결과
+
+관찰된 변화:
+
+- page 1 반복 출처 감소
+- retrieval 결과 출처 다양성 증가
+
+하지만:
+
+- 정답률 개선은 제한적
+
+이를 통해 retrieval 품질은 단순 검색 알고리즘 변경만으로 해결되지 않는다는 점을 확인했습니다.
+
+## 트러블슈팅
+
+### 1. 표지 / 목차 페이지 과매칭
+
+문서 표지나 목차는 핵심 키워드를 많이 포함하기 때문에 실제 본문보다 retrieval 상위에 노출되는 문제가 발생했습니다.
+
+해결 방향:
+
+- 표지/목차 chunk 가중치 하향
+- 특정 패턴 페이지 제외
+
+### 2. Retrieval 다양성과 정확도의 Trade-off
+
+MMR을 적용하면 중복 chunk는 줄지만 항상 정답률이 개선되는 것은 아니었습니다.
+
+배운 점:
+
+Retrieval은 아래 요소를 함께 고려해야 합니다.
+
+- 검색 전략
+- chunk 전략
+- 문서 구조
+- 문서 필터링
+
+### 3. 다문서 환경에서의 Chunk 혼합 문제
+
+현재 retrieval이 특정 문서 범위로 제한되지 않으면 여러 문서 chunk가 섞일 수 있습니다.
+
+개선 계획:
+
+- `/ask` 요청에 `file_id` 기반 retrieval 필터 적용
+
+## 폴더 구조
+
+```text
+docpilot-rag/
+├─ backend/
+│  ├─ app/
+│  │  ├─ api/
+│  │  ├─ services/
+│  │  ├─ schemas/
+│  │  └─ main.py
+│  ├─ data/
+│  │  ├─ uploads/
+│  │  └─ chroma/
+│  ├─ scripts/
+│  └─ requirements.txt
+└─ frontend/
+```
+
+## 실행 방법
+
+### Backend
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## 포트폴리오 포인트
+
+이 프로젝트에서 중점적으로 구현한 부분:
+
+- RAG 파이프라인 end-to-end 구현
+- 문서 기반 QA 시스템 구조 설계
+- Retrieval 품질 비교 실험 구성
+- 답변 + 출처 제공 UX 구현
+
+단순히 LLM 호출이 아니라 문서 처리 → 검색 → 생성 → 근거 제공까지 이어지는 실제 서비스 구조를 구현했습니다.
+
+## 향후 개선
+
+- `file_id` 기반 retrieval 필터
+- 표지/목차 chunk 필터링
+- chunk 전략 개선
+- 평가셋 확장
+- citation UX 개선
