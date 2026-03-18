@@ -22,7 +22,8 @@ MAX_UPLOAD_SIZE_MB = 50
 MAX_UPLOAD_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 160
-ASK_TOP_K = 3
+# Retrieve 5 chunks first, then generate answer from those retrieved contexts.
+ASK_TOP_K = 5
 
 # Load backend/.env into process env at startup import time.
 load_dotenv(BASE_DIR / ".env")
@@ -53,6 +54,7 @@ def health() -> dict[str, str]:
 
 @app.post("/upload", response_model=UploadResponse)
 async def upload(file: UploadFile = File(...)) -> UploadResponse:
+    # 1) Validate upload input first (type/size/empty) before any processing.
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -84,6 +86,7 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
     json_path = UPLOAD_DIR / f"{file_id}.json"
 
     try:
+        # 2) Save original PDF to disk so upload history is traceable.
         pdf_path.write_bytes(content)
     except OSError as exc:
         raise HTTPException(
@@ -92,6 +95,7 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
         ) from exc
 
     try:
+        # 3) Extract -> chunk -> embed -> upsert to vector DB (RAG indexing pipeline).
         extracted = extract_pdf_text(content)
         chunks = chunk_document_with_page_metadata(
             pages=list(extracted.get("pages", [])),
@@ -104,6 +108,7 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
         chunk_embeddings = embed_texts(chunk_contents)
         upsert_chunks(file_id=file_id, chunks=chunks, embeddings=chunk_embeddings)
 
+        # 4) Save extracted text/chunks JSON for debugging and quality checks.
         payload = {
             "file_id": file_id,
             "original_filename": file.filename,
@@ -136,6 +141,7 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
 @app.post("/ask", response_model=AskResponse)
 def ask(payload: AskRequest) -> AskResponse:
     try:
+        # Query flow: question -> embedding -> retrieval -> LLM generation.
         query_embedding = embed_query(payload.question)
         result = query_top_k(query_embedding, k=ASK_TOP_K)
 
@@ -168,6 +174,7 @@ def ask(payload: AskRequest) -> AskResponse:
                     score=score,
                 )
             )
+            # `contexts` is what we actually pass to GPT for answer generation.
             contexts.append(snippet)
 
         answer = generate_answer(payload.question, contexts)

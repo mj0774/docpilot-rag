@@ -5,6 +5,9 @@ def chunk_document_with_page_metadata(
     chunk_size: int = 800,
     overlap: int = 160,
 ) -> list[dict[str, object]]:
+    # Document-level chunking:
+    # merge all pages into one text stream, then apply sliding-window chunks.
+    # page metadata is recovered from character-range overlap.
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive.")
     if overlap < 0:
@@ -52,6 +55,7 @@ def chunk_document_with_page_metadata(
         chunk_end = min(chunk_start + chunk_size, len(full_text))
         piece = full_text[chunk_start:chunk_end]
         if piece.strip():
+            # Choose the first overlapping page as representative page for this chunk.
             touched_pages = [
                 pr["page"]
                 for pr in page_ranges

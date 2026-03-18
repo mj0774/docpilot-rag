@@ -22,6 +22,7 @@ def extract_pdf_text(pdf_bytes: bytes) -> dict[str, object]:
 
     with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
         for idx, page in enumerate(document, start=1):
+            # OCR is not included in MVP: only text layer is extracted.
             text = _normalize_text(page.get_text("text"))
             if not text:
                 continue
