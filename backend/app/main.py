@@ -18,7 +18,8 @@ from app.services.vector_store import query_top_k, upsert_chunks
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 UPLOAD_DIR = BASE_DIR / "data" / "uploads"
-MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20MB
+MAX_UPLOAD_SIZE_MB = 50
+MAX_UPLOAD_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 160
 ASK_TOP_K = 3
@@ -74,7 +75,7 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
     if len(content) > MAX_UPLOAD_SIZE:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="파일 크기는 20MB 이하여야 합니다.",
+            detail=f"파일 크기는 {MAX_UPLOAD_SIZE_MB}MB 이하여야 합니다.",
         )
 
     file_id = uuid4().hex
@@ -151,17 +152,19 @@ def ask(payload: AskRequest) -> AskResponse:
         for idx, doc in enumerate(docs):
             metadata = metas[idx] if idx < len(metas) and isinstance(metas[idx], dict) else {}
             distance = dists[idx] if idx < len(dists) else None
-            score = float(distance) if isinstance(distance, (float, int)) else None
-            chunk_index_raw = metadata.get("chunk_index")
-            chunk_index = chunk_index_raw if isinstance(chunk_index_raw, int) else None
+            score = None
+            if isinstance(distance, (float, int)):
+                # Chroma distance is lower-is-better; map to 0~1 similarity-like score.
+                score = max(0.0, min(1.0, 1.0 - float(distance)))
+            page_raw = metadata.get("page")
+            page = page_raw if isinstance(page_raw, int) else None
             snippet = str(doc)
 
             sources.append(
                 SourceItem(
                     title=str(metadata.get("filename", "")) or None,
+                    page=page,
                     snippet=snippet,
-                    file_id=str(metadata.get("file_id", "")) or None,
-                    chunk_index=chunk_index,
                     score=score,
                 )
             )

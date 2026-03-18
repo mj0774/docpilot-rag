@@ -17,8 +17,6 @@ class SourceItem(BaseModel):
     title: str | None = None
     page: int | None = None
     snippet: str
-    file_id: str | None = None
-    chunk_index: int | None = None
     score: float | None = None
 
 

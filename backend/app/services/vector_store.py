@@ -41,6 +41,7 @@ def upsert_chunks(file_id: str, chunks: list[dict[str, Any]], embeddings: list[l
             {
                 "file_id": str(metadata.get("file_id", file_id)),
                 "filename": str(metadata.get("filename", "")),
+                "page": int(metadata["page"]) if isinstance(metadata.get("page"), int) else None,
                 "chunk_index": int(chunk_index),
             }
         )

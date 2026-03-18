@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { FormEvent } from 'react'
+import type { DragEvent, FormEvent } from 'react'
 import { API_BASE_URL, askQuestion, uploadDocument } from './lib/api'
 import type { SourceItem } from './types/api'
 
@@ -16,6 +16,39 @@ function App() {
 
   const [isUploading, setIsUploading] = useState(false)
   const [isAsking, setIsAsking] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
+
+  const handleFileSelect = (file: File | null) => {
+    if (!file) return
+
+    const isPdfType = file.type === 'application/pdf'
+    const isPdfExtension = file.name.toLowerCase().endsWith('.pdf')
+    if (!isPdfType && !isPdfExtension) {
+      setUploadError('PDF 파일만 업로드할 수 있습니다.')
+      return
+    }
+
+    setSelectedFile(file)
+    setUploadError('')
+    setUploadStatus('')
+  }
+
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setIsDragOver(false)
+    const file = event.dataTransfer.files?.[0] ?? null
+    handleFileSelect(file)
+  }
+
+  const onDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setIsDragOver(true)
+  }
+
+  const onDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setIsDragOver(false)
+  }
 
   const onUpload = async (event: FormEvent) => {
     event.preventDefault()
@@ -83,13 +116,29 @@ function App() {
             <p className="mt-1 text-sm text-slate-600">PDF 파일을 선택하고 서버로 전송합니다.</p>
 
             <form className="mt-4 space-y-4" onSubmit={onUpload}>
+              <div
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+                className={`rounded-lg border-2 border-dashed p-4 text-center text-sm transition ${
+                  isDragOver ? 'border-cyan-600 bg-cyan-50 text-cyan-800' : 'border-slate-300 bg-slate-50 text-slate-600'
+                }`}
+              >
+                PDF를 여기에 드래그 앤 드롭하거나 아래에서 파일을 선택하세요.
+              </div>
+
               <input
                 type="file"
                 accept=".pdf,application/pdf"
-                onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => handleFileSelect(event.target.files?.[0] ?? null)}
                 className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-md file:border-0 file:bg-cyan-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-cyan-700"
                 disabled={isUploading}
               />
+              {selectedFile && (
+                <p className="text-xs text-slate-600">
+                  선택된 파일: <span className="font-medium">{selectedFile.name}</span>
+                </p>
+              )}
               <button
                 type="submit"
                 disabled={isUploading}

@@ -25,6 +25,7 @@ def chunk_document_with_page_metadata(
         return []
 
     full_text_parts: list[str] = []
+    page_ranges: list[dict[str, int]] = []
     cursor = 0
 
     for idx, page in enumerate(normalized_pages):
@@ -32,9 +33,14 @@ def chunk_document_with_page_metadata(
             full_text_parts.append("\n\n")
             cursor += 2
 
+        page_no = int(page["page"])
         text = str(page["text"])
+        start = cursor
         full_text_parts.append(text)
         cursor += len(text)
+        end = cursor
+
+        page_ranges.append({"page": page_no, "start": start, "end": end})
 
     full_text = "".join(full_text_parts)
     step = chunk_size - overlap
@@ -46,12 +52,20 @@ def chunk_document_with_page_metadata(
         chunk_end = min(chunk_start + chunk_size, len(full_text))
         piece = full_text[chunk_start:chunk_end]
         if piece.strip():
+            touched_pages = [
+                pr["page"]
+                for pr in page_ranges
+                if pr["end"] > chunk_start and pr["start"] < chunk_end
+            ]
+            page = touched_pages[0] if touched_pages else None
+
             chunks.append(
                 {
                     "content": piece,
                     "metadata": {
                         "file_id": file_id,
                         "filename": filename,
+                        "page": page,
                         "chunk_index": chunk_index,
                     },
                 }
