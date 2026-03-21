@@ -12,7 +12,9 @@ MMR_CANDIDATE_MULTIPLIER = 4
 
 
 def _get_collection():
-    # PersistentClient stores vector index files under backend/data/chroma.
+    # Chroma PersistentClient:
+    # 벡터 인덱스 파일을 backend/data/chroma 아래에 영구 저장한다.
+    # 서버 재시작 후에도 인덱스를 재사용할 수 있다.
     CHROMA_DIR.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(CHROMA_DIR))
     return client.get_or_create_collection(name=COLLECTION_NAME)
@@ -35,9 +37,10 @@ def _mmr_select_indices(
     k: int,
     lambda_mult: float = MMR_LAMBDA,
 ) -> list[int]:
-    # Greedy MMR selection:
-    # - relevance to question (query similarity)
-    # - diversity against already selected chunks
+    # Greedy MMR 선택:
+    # 1) 질문과의 관련도는 높게 유지하고
+    # 2) 이미 고른 청크와 너무 비슷한 후보는 감점한다.
+    # 결과적으로 "관련도 + 다양성"을 동시에 확보한다.
     if len(candidate_embeddings) == 0:
         return []
 
@@ -46,7 +49,7 @@ def _mmr_select_indices(
     remaining = list(range(len(candidate_embeddings)))
     query_sims = [_cosine_similarity(query_embedding, emb) for emb in candidate_embeddings]
 
-    # MMR: keep relevance to question while penalizing near-duplicate chunks.
+    # MMR 점수 계산을 반복하면서 최종 k개를 순차적으로 뽑는다.
     while remaining and len(selected) < target:
         best_idx = remaining[0]
         best_score = float("-inf")
@@ -71,7 +74,7 @@ def _mmr_select_indices(
 
 
 def query_similarity_k(query_embedding: list[float], k: int = 3) -> dict[str, Any]:
-    """Baseline retrieval: pure similarity top-k (project's previous behavior)."""
+    """기존 방식: 순수 유사도 기반 top-k 검색."""
     if not query_embedding:
         return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
 
@@ -84,7 +87,8 @@ def query_similarity_k(query_embedding: list[float], k: int = 3) -> dict[str, An
 
 
 def upsert_chunks(file_id: str, chunks: list[dict[str, Any]], embeddings: list[list[float]]) -> None:
-    # Upsert by deterministic id(file_id:chunk_index) so re-upload overwrites same chunk ids.
+    # id를 file_id:chunk_index 규칙으로 고정해 upsert한다.
+    # 같은 파일/청크가 다시 들어오면 중복 추가가 아니라 동일 id 레코드가 갱신된다.
     if not chunks:
         return
     if len(chunks) != len(embeddings):
@@ -129,12 +133,13 @@ def upsert_chunks(file_id: str, chunks: list[dict[str, Any]], embeddings: list[l
 
 
 def query_top_k(query_embedding: list[float], k: int = 3) -> dict[str, Any]:
-    """Current retrieval: MMR top-k for relevance + diversity."""
+    """현재 방식: MMR 기반 top-k 검색(관련도 + 다양성)."""
     if not query_embedding:
         return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
 
     collection = _get_collection()
-    # Step 1) retrieve a wider candidate pool by similarity.
+    # 1단계) 먼저 similarity로 후보를 넉넉히 가져온다.
+    # 예: 최종 k=5면 후보는 20개(k*4) 조회
     candidate_k = max(k * MMR_CANDIDATE_MULTIPLIER, k)
     result = collection.query(
         query_embeddings=[query_embedding],
@@ -155,7 +160,8 @@ def query_top_k(query_embedding: list[float], k: int = 3) -> dict[str, Any]:
     cand_embs = embeddings[0] if embeddings else []
 
     if len(cand_embs) == 0:
-        # Fallback: if embeddings are unavailable, return similarity order as-is.
+        # 예외 상황: 후보 임베딩이 없으면 MMR 재정렬이 불가능하므로
+        # 기존 similarity 순서를 그대로 반환한다.
         return {
             "ids": [cand_ids[:k]],
             "documents": [cand_docs[:k]],
@@ -163,7 +169,7 @@ def query_top_k(query_embedding: list[float], k: int = 3) -> dict[str, Any]:
             "distances": [cand_dists[:k]],
         }
 
-    # Step 2) rerank candidates with MMR and keep final top-k.
+    # 2단계) 후보를 MMR로 재정렬해 최종 k개를 선택한다.
     selected_indices = _mmr_select_indices(query_embedding, cand_embs, k)
     return {
         "ids": [[cand_ids[i] for i in selected_indices if i < len(cand_ids)]],

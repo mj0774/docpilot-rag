@@ -22,7 +22,8 @@ def extract_pdf_text(pdf_bytes: bytes) -> dict[str, object]:
 
     with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
         for idx, page in enumerate(document, start=1):
-            # OCR is not included in MVP: only text layer is extracted.
+            # MVP 단계에서는 OCR을 쓰지 않고 PDF의 텍스트 레이어만 추출한다.
+            # 따라서 이미지 스캔 PDF는 텍스트가 거의 비어 있을 수 있다.
             text = _normalize_text(page.get_text("text"))
             if not text:
                 continue

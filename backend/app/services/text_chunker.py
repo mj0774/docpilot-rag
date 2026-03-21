@@ -5,9 +5,11 @@ def chunk_document_with_page_metadata(
     chunk_size: int = 800,
     overlap: int = 160,
 ) -> list[dict[str, object]]:
-    # Document-level chunking:
-    # merge all pages into one text stream, then apply sliding-window chunks.
-    # page metadata is recovered from character-range overlap.
+    # 문서 전체 기준 청킹:
+    # 1) 페이지 텍스트를 하나의 긴 문자열로 합친 뒤
+    # 2) 슬라이딩 윈도우(chunk_size/overlap)로 나눈다.
+    # 3) 각 청크가 어떤 페이지 구간과 겹치는지 계산해 page 메타데이터를 붙인다.
+    # 이 방식은 페이지 경계를 넘는 문장도 비교적 자연스럽게 보존한다.
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive.")
     if overlap < 0:
@@ -55,7 +57,8 @@ def chunk_document_with_page_metadata(
         chunk_end = min(chunk_start + chunk_size, len(full_text))
         piece = full_text[chunk_start:chunk_end]
         if piece.strip():
-            # Choose the first overlapping page as representative page for this chunk.
+            # 여러 페이지와 겹칠 수 있으므로, 첫 겹침 페이지를 대표 page로 저장한다.
+            # (UI에 p.X를 간단히 보여주기 위한 선택)
             touched_pages = [
                 pr["page"]
                 for pr in page_ranges

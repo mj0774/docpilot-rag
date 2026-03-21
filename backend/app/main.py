@@ -22,10 +22,12 @@ MAX_UPLOAD_SIZE_MB = 50
 MAX_UPLOAD_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 160
-# Retrieve 5 chunks first, then generate answer from those retrieved contexts.
+# 질의 시 검색할 기본 chunk 개수.
+# k를 너무 작게 잡으면 근거가 부족하고, 너무 크게 잡으면 노이즈가 늘어나므로
+# 현재는 균형값으로 5를 사용한다.
 ASK_TOP_K = 5
 
-# Load backend/.env into process env at startup import time.
+# 서버 시작 시점에 backend/.env를 로드해 OpenAI 키/모델 설정을 읽는다.
 load_dotenv(BASE_DIR / ".env")
 
 app = FastAPI(title="DocPilot-RAG API", version="0.1.0")
@@ -54,7 +56,12 @@ def health() -> dict[str, str]:
 
 @app.post("/upload", response_model=UploadResponse)
 async def upload(file: UploadFile = File(...)) -> UploadResponse:
-    # 1) Validate upload input first (type/size/empty) before any processing.
+    # 1) 업로드 입력 검증
+    # - 파일명 존재 여부
+    # - PDF 확장자 여부
+    # - 빈 파일 여부
+    # - 최대 용량 제한
+    # 먼저 검증해서 불필요한 추출/임베딩 호출을 막는다.
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -86,7 +93,8 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
     json_path = UPLOAD_DIR / f"{file_id}.json"
 
     try:
-        # 2) Save original PDF to disk so upload history is traceable.
+        # 2) 원본 PDF 저장
+        # 업로드 이력 추적과 재처리(디버깅/검증)를 위해 파일을 먼저 로컬에 저장한다.
         pdf_path.write_bytes(content)
     except OSError as exc:
         raise HTTPException(
@@ -95,7 +103,9 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
         ) from exc
 
     try:
-        # 3) Extract -> chunk -> embed -> upsert to vector DB (RAG indexing pipeline).
+        # 3) RAG 인덱싱 파이프라인
+        # 추출 -> 청킹 -> 임베딩 -> 벡터DB 저장 순서로 처리한다.
+        # 이 단계가 끝나면 /ask에서 검색 가능한 상태가 된다.
         extracted = extract_pdf_text(content)
         chunks = chunk_document_with_page_metadata(
             pages=list(extracted.get("pages", [])),
@@ -108,7 +118,8 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
         chunk_embeddings = embed_texts(chunk_contents)
         upsert_chunks(file_id=file_id, chunks=chunks, embeddings=chunk_embeddings)
 
-        # 4) Save extracted text/chunks JSON for debugging and quality checks.
+        # 4) 추출 결과 JSON 저장
+        # 페이지 텍스트/청크를 파일로 남겨 retrieval 품질 점검 시 근거로 사용한다.
         payload = {
             "file_id": file_id,
             "original_filename": file.filename,
@@ -141,7 +152,8 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
 @app.post("/ask", response_model=AskResponse)
 def ask(payload: AskRequest) -> AskResponse:
     try:
-        # Query flow: question -> embedding -> retrieval -> LLM generation.
+        # 질의 처리 흐름
+        # 질문 -> 임베딩 -> 벡터 검색 -> LLM 답변 생성
         query_embedding = embed_query(payload.question)
         result = query_top_k(query_embedding, k=ASK_TOP_K)
 
@@ -160,7 +172,8 @@ def ask(payload: AskRequest) -> AskResponse:
             distance = dists[idx] if idx < len(dists) else None
             score = None
             if isinstance(distance, (float, int)):
-                # Chroma distance is lower-is-better; map to 0~1 similarity-like score.
+                # Chroma의 distance는 "낮을수록 유사"이므로
+                # UI에서 보기 쉬운 0~1 점수 형태로 변환해 내려준다.
                 score = max(0.0, min(1.0, 1.0 - float(distance)))
             page_raw = metadata.get("page")
             page = page_raw if isinstance(page_raw, int) else None
@@ -174,7 +187,7 @@ def ask(payload: AskRequest) -> AskResponse:
                     score=score,
                 )
             )
-            # `contexts` is what we actually pass to GPT for answer generation.
+            # contexts는 실제로 GPT에게 전달되는 근거 문맥 목록이다.
             contexts.append(snippet)
 
         answer = generate_answer(payload.question, contexts)
